@@ -1,11 +1,11 @@
 name: "ok-ww"
 uac: true
 icon: "icons/icon.png"
-website: "http://ok-script.com/ok-ww"
+website: "https://github.com/luqiang2013/ok-wuthering-waves-lite"
 
 profiles:
-  - name: "China"
-    git_url: "https://cnb.cool/ok-oldking/ok-ww-update2.git"
+  - name: "Lite"
+    git_url: "https://github.com/luqiang2013/ok-wuthering-waves-lite.git"
     admin: true
     main_script: "main.py"
     requires_python: "3.12"
@@ -13,11 +13,5 @@ profiles:
     use_pythonw: true
     pip_args: "--no-deps"
     show_add_defender: true
-    # PYTHONPATH: "your/default/path" # Optional, will be "" if missing
-
-  - name: "Global"
-    git_url: "https://github.com/ok-oldking/ok-ww-update.git"
-    main_script: "main.py"
-    requirements: "requirements.txt"
 
 

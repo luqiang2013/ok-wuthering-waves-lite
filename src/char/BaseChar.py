@@ -224,9 +224,41 @@ class BaseChar:
         Subclasses should normally customize ``do_perform`` and leave this wrapper
         intact so timing/logging behavior remains consistent.
         """
+        recorder = getattr(self.task, 'battle_log', None)
+        if recorder is not None:
+            sync_enabled = getattr(self.task, 'sync_battle_log_enabled', None)
+            enabled = sync_enabled() if callable(sync_enabled) else recorder.ensure_started(
+                getattr(self.task, 'chars', ()),
+                metadata={'task_type': self.task.__class__.__name__},
+            )
+            if enabled:
+                self.log_battle_decision(
+                    '角色轮转开始',
+                    True,
+                    '执行角色战斗逻辑',
+                    detail={
+                        'has_intro': self.has_intro,
+                        'con': round(float(self.current_con or 0), 3),
+                    },
+                )
         self.last_perform = time.time()
         self.do_perform()
         self.logger.debug(f'set current char false {self.index}')
+
+    def _battle_log_recorder(self):
+        recorder = getattr(self.task, 'battle_log', None)
+        return recorder if recorder is not None and getattr(recorder, 'active', False) else None
+
+    def log_battle_decision(self, condition, result, action, detail=None, data=None):
+        recorder = self._battle_log_recorder()
+        if recorder is not None:
+            recorder.record_decision(self, condition, result, action, detail=detail, data=data)
+        return result
+
+    def log_battle_action(self, action, detail=None, condition='', result=None, data=None):
+        recorder = self._battle_log_recorder()
+        if recorder is not None:
+            recorder.record_action(self, action, detail=detail, condition=condition, result=result, data=data)
 
     def wait_down(self, click=True):
         """等待角色从空中落下到地面。"""
@@ -253,6 +285,7 @@ class BaseChar:
             click (bool, optional): 等待期间是否持续点击。默认为 True。
         """
         if self.has_intro:
+            self.log_battle_decision('存在入场动作', True, '等待入场动作结束', detail={'timeout': time_out})
             self.task.wait_until(self.down, post_action=self.click_with_interval if click else None, time_out=time_out)
 
     def down(self):
@@ -347,6 +380,16 @@ class BaseChar:
             It snapshots availability, handles toolbox state, and lets the task
             choose the best teammate according to role, intro, and priority.
         """
+        self.log_battle_decision(
+            '准备切换角色',
+            self.has_intro or free_intro or self.current_con == 1,
+            '请求切换到最优队友',
+            detail={
+                'free_intro': free_intro,
+                'target_low_con': target_low_con,
+                'con': self.current_con,
+            },
+        )
         self.is_forte_full()
         self.has_intro = False
         self.has_sub_dps_intro = False
@@ -458,6 +501,12 @@ class BaseChar:
         if animation_start > 0:
             self.add_freeze_duration(resonance_click_time, time.time() - animation_start)
         self.logger.debug(f'click_resonance end clicked {clicked} duration {duration} animated {animation_start > 0}')
+        self.log_battle_decision(
+            '共鸣技能释放结果',
+            clicked,
+            '共鸣技能已释放' if clicked else '共鸣技能未释放',
+            detail={'clicked': clicked, 'duration': round(duration, 3), 'animated': animation_start > 0},
+        )
         return clicked, duration, animation_start > 0
 
     def send_resonance_key(self, post_sleep=0, interval=-1, down_time=0.01):
@@ -487,11 +536,15 @@ class BaseChar:
         """
         if check_fun is None:
             check_fun = self.is_forte_full
-        if check_fun():
+        available = bool(check_fun())
+        self.log_battle_decision('回路强化重击可用', available,
+                                 '执行强化重击' if available else '跳过强化重击')
+        if available:
             self.task.mouse_down()
             success = self.task.wait_until(lambda: not check_fun(), time_out=2)
             self.task.mouse_up()
             self.sleep(0.05)
+            self.log_battle_action('强化重击执行结束', result=success, condition='强化重击提示消失')
             return success
 
     def send_liberation_key(self, after_sleep=0, interval=-1, down_time=0.01):
@@ -508,14 +561,17 @@ class BaseChar:
     def record_resonance_use(self):
         """更新共鸣技能的最后使用时间。"""
         self.last_res = time.time()
+        self.log_battle_action('记录共鸣技能已使用')
 
     def record_liberation_use(self):
         """更新共鸣解放的最后使用时间。"""
         self.last_liberation = time.time()
+        self.log_battle_action('记录共鸣解放已使用')
 
     def record_echo_use(self):
         """更新声骸技能的最后使用时间。"""
         self.last_echo = time.time()
+        self.log_battle_action('记录声骸技能已使用')
 
     def click_echo(self, duration=0, sleep_time=0, time_out=1):
         """尝试点击并释放声骸技能。
@@ -534,10 +590,12 @@ class BaseChar:
             self.logger.debug('click echo')
             return True
         if self.task.is_open_world_auto_combat() and self.ring_index == Elements.FIRE:
+            self.log_battle_decision('声骸释放条件', False, '跳过声骸技能', detail='open_world_fire_echo')
             self.logger.debug(f'open world do not use motorcycle echo')
             return False
         self.logger.debug(f'click_echo start duration: {duration}')
         if self.has_cd('echo'):
+            self.log_battle_decision('声骸技能可用', False, '跳过声骸技能', detail='cooldown')
             self.logger.debug('click_echo has cd return ')
             return False
         clicked = False
@@ -546,6 +604,7 @@ class BaseChar:
         time_out += duration
         while True:
             if time.time() - start > time_out:
+                self.log_battle_decision('声骸技能释放结果', False, '声骸技能等待超时')
                 self.logger.info("click_echo time out")
                 return False
             if not self.echo_available() and (duration == 0 or not clicked):
@@ -566,6 +625,8 @@ class BaseChar:
                 break
             self.task.next_frame()
         self.logger.debug(f'click_echo end {clicked}')
+        self.log_battle_decision('声骸技能释放结果', clicked,
+                                 '声骸技能已释放' if clicked else '声骸技能未释放')
         return clicked
 
     def is_open_world_auto_combat(self):
@@ -606,9 +667,12 @@ class BaseChar:
             bool: 如果成功释放则返回 True。
         """
         if not self.task.use_liberation:
+            self.log_battle_decision('共鸣解放可用', False, '跳过共鸣解放', detail='disabled_by_config')
             return False
         if con_less_than > 0:
             if self.get_current_con() > con_less_than:
+                self.log_battle_decision('共鸣解放协奏限制', False, '跳过共鸣解放',
+                                         detail={'con_less_than': con_less_than})
                 return False
         self.logger.debug(f'click_liberation start')
         start = time.time()
@@ -636,6 +700,7 @@ class BaseChar:
                     self.logger.debug(f'not in_team successfully casted liberation')
                 else:
                     self.task.in_liberation = False
+                    self.log_battle_decision('共鸣解放释放结果', False, '已点击但未检测到释放')
                     self.logger.error(f'clicked liberation but no effect')
                     return False
             else:
@@ -646,6 +711,7 @@ class BaseChar:
                         self.task.in_liberation = True
                         self.logger.debug(f'not in_team successfully casted liberation')
                 if not self.task.in_liberation:
+                    self.log_battle_decision('共鸣解放释放结果', False, '未进入解放动画')
                     return False
         start = time.time()
         last_f_click = 0
@@ -671,6 +737,9 @@ class BaseChar:
         self._liberation_available = False
         if clicked:
             self.logger.info(f'click_liberation end {duration}')
+        self.log_battle_decision('共鸣解放释放结果', clicked,
+                                 '共鸣解放已释放' if clicked else '共鸣解放未释放',
+                                 detail={'duration': round(duration, 3)})
         return clicked
 
     def on_combat_end(self, chars):
@@ -853,6 +922,14 @@ class BaseChar:
             click_resonance_if_ready_and_return (bool, optional): 如果共鸣技能可用, 是否立即释放并返回。默认为 False。
             until_con_full (bool, optional): 是否持续攻击直到协奏值满。默认为 False。
         """
+        self.log_battle_action(
+            '连续普通攻击',
+            detail={
+                'duration': duration,
+                'until_con_full': until_con_full,
+                'click_resonance_if_ready': click_resonance_if_ready_and_return,
+            },
+        )
         start = time.time()
         while time.time() - start < duration:
             if click_resonance_if_ready_and_return and self.resonance_available():
@@ -870,13 +947,18 @@ class BaseChar:
         retry. Returns True when the condition is met, or False on timeout.
         A non-positive timeout checks the condition once without clicking.
         """
+        condition_name = getattr(condition, '__name__', repr(condition))
         if time_out <= 0:
-            return bool(condition())
-        return bool(self.task.wait_until(
-            condition, time_out=time_out, settle_time=0,
-            pre_action=self.check_combat,
-            post_action=lambda: self.click(interval=interval),
-        ))
+            result = bool(condition())
+        else:
+            result = bool(self.task.wait_until(
+                condition, time_out=time_out, settle_time=0,
+                pre_action=self.check_combat,
+                post_action=lambda: self.click(interval=interval),
+            ))
+        self.log_battle_decision('等待动作条件', result, '停止普通攻击' if result else '条件等待超时',
+                                 detail={'condition': condition_name, 'timeout': time_out})
+        return result
 
     def continues_click(self, key, duration, interval=0.1):
         """持续发送指定按键一段时间。
@@ -898,6 +980,7 @@ class BaseChar:
             interval (float, optional): 每次发送按键的间隔。默认为 0.1。
             direction_key (str, optional): 如果指定，则在点击期间同时按下此键（如 'w'、'a'、's'、'd'）。
         """
+        self.log_battle_action('连续闪避/右键', detail={'duration': duration, 'direction': direction_key})
         if direction_key is not None:
             self.task.send_key_down(direction_key)
             self.task.next_frame()
@@ -910,6 +993,7 @@ class BaseChar:
     def normal_attack(self):
         """执行一次普通攻击。"""
         self.logger.debug('normal attack')
+        self.log_battle_action('普通攻击')
         self.check_combat()
         self.task.click()
 
@@ -919,6 +1003,7 @@ class BaseChar:
         Args:
             duration (float, optional): 重攻击按键按下的持续时间。默认为 0.6。
         """
+        self.log_battle_decision('准备重击', True, '执行重击', detail={'duration': duration})
         self.check_combat()
         self.logger.debug('heavy attack start')
         self.task.mouse_down()
@@ -926,6 +1011,7 @@ class BaseChar:
         self.task.mouse_up()
         self.sleep(0.01)
         self.logger.debug('heavy attack end')
+        self.log_battle_action('重击执行结束', detail={'duration': duration})
 
     def current_resonance(self):
         """获取当前共鸣技能UI白色像素百分比。"""

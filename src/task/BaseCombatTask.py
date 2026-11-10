@@ -14,6 +14,7 @@ from src.char import BaseChar
 from src.char.BaseChar import SwitchPriority, dot_color  # noqa
 from src.char.CharFactory import apply_team_char_classes, get_char_by_pos
 from src.combat.CombatCheck import CombatCheck
+from src.task.BattleLog import BattleLogRecorder
 from src.task.BaseWWTask import isolate_white_text_to_black, binarize_for_matching
 
 logger = Logger.get_logger(__name__)
@@ -76,6 +77,9 @@ class BaseCombatTask(CombatCheck):
         self.char_texts = ['char_1_text', 'char_2_text', 'char_3_text']  # 角色文本标识符列表
         self.mouse_pos = None  # 当前鼠标位置
         self.combat_start = 0  # 战斗开始时间戳
+        self.battle_log = BattleLogRecorder(task_name=self.__class__.__name__)
+        self._battle_outcome = 'completed'
+        self._battle_outcome_detail = None
         self._abyss_force_combat_until = 0
         self._abyss_combat_active = False
         self._abyss_timer_checked_at = 0
@@ -87,7 +91,31 @@ class BaseCombatTask(CombatCheck):
         # 由副本恢复循环维护: 本轮从信标直接进本时, 退本即回到信标并自动回血
         self.realm_entry_at_heal_point = False
 
+    def battle_log_enabled(self):
+        config = getattr(self, 'config', None)
+        value = config.get('启用战斗日志', None) if config is not None else None
+        if value is not None:
+            return bool(value)
+        try:
+            from src.task.AutoCombatTask import AutoCombatTask
+            config_task = self.get_task_by_class(AutoCombatTask)
+        except Exception:
+            config_task = None
+        if config_task is not None and getattr(config_task, 'config', None) is not None:
+            return bool(config_task.config.get('启用战斗日志', True))
+        return True
+
+    def sync_battle_log_enabled(self):
+        enabled = self.battle_log_enabled()
+        self.battle_log.set_enabled(enabled)
+        if enabled:
+            self.battle_log.ensure_started(self.chars, metadata={
+                'task_type': self.__class__.__name__,
+            })
+        return enabled
+
     def reset_combat_state(self, reason='combat reset'):
+        self.battle_log.finish(outcome='aborted', detail=reason)
         self.reset_to_false(reason)
         self.chars = [None, None, None]
         self.freeze_durations = []
@@ -325,6 +353,7 @@ class BaseCombatTask(CombatCheck):
             exception_type (Exception, optional): 要抛出的异常类型。默认为 NotInCombatException。
         """
         exception_type = None
+        self.battle_log.note('战斗状态检查失败', False, '尝试恢复或结束战斗', message)
         logger.error(message)
         if self.wait_feature('revive_confirm_hcenter_vcenter', threshold=0.8, time_out=2):
             self.log_info(self.tr('raise_not_in_combat char dead'))
@@ -550,14 +579,20 @@ class BaseCombatTask(CombatCheck):
         if self.switch_healer_enabled():
             self.load_chars()
             self.switch_healer()
+        self.sync_battle_log_enabled()
         self.info['Combat Count'] = self.info.get('Combat Count', 0) + 1
         try:
             while self.in_combat():
                 logger.debug(f'combat_once loop {self.chars}')
                 self.get_current_char().perform()
         except CharDeadException as e:
+            self._battle_outcome = 'char_dead'
+            self._battle_outcome_detail = str(e)
+            self.battle_log.finish(outcome=self._battle_outcome, detail=self._battle_outcome_detail)
             raise e
         except NotInCombatException as e:
+            self._battle_outcome = 'left_combat'
+            self._battle_outcome_detail = str(e)
             logger.info(f'combat_once out of combat break {e}')
         self.combat_end()
         if self.switch_healer_enabled():
@@ -626,6 +661,19 @@ class BaseCombatTask(CombatCheck):
         buff_active = char.has_buff()
         buff_remaining = self._buff_remaining(char) if buff_active else 0
         switch_cd = char.last_switch_time >= 0 and self._target_has_switch_cd(char)
+        self.battle_log.record_decision(
+            char,
+            '切换候选评估',
+            priority,
+            '参与目标选择',
+            detail={
+                'role': str(char.char_type),
+                'buff_active': buff_active,
+                'buff_remaining': round(buff_remaining, 3),
+                'switch_cd': switch_cd,
+                'index': char.index,
+            },
+        )
         logger.debug(
             f'switch selection candidate={char} index={char.index} role={char.char_type} '
             f'priority={priority} buff_active={buff_active} buff_remaining={buff_remaining:.2f} '
@@ -633,6 +681,13 @@ class BaseCombatTask(CombatCheck):
             f'switch_cd={switch_cd} last_switch_time={char.last_switch_time:.3f}')
 
     def _log_switch_choice(self, current_char, target, has_intro, reason):
+        self.battle_log.record_decision(
+            current_char,
+            '切换目标',
+            target.name if target else '',
+            f'切换到 {target.name}' if target and target != current_char else '保持当前角色',
+            detail={'has_intro': has_intro, 'reason': reason},
+        )
         logger.info(
             f'switch selection result current={current_char}({current_char.char_type}) '
             f'target={target}({target.char_type}) has_intro={has_intro} reason={reason}')
@@ -932,6 +987,10 @@ class BaseCombatTask(CombatCheck):
 
     def combat_end(self):
         """战斗结束时调用的清理方法。"""
+        self.battle_log.finish(
+            outcome=self._battle_outcome,
+            detail=self._battle_outcome_detail,
+        )
         current_char = self.get_current_char(raise_exception=False)
         if current_char:
             current_char.on_combat_end(self.chars)
@@ -976,6 +1035,35 @@ class BaseCombatTask(CombatCheck):
             # if self.debug:
             #     self.screenshot('not_in_combat_calling_check_combat')
             self.raise_not_in_combat('combat check not in combat')
+
+    def wait_until(self, *args, **kwargs):
+        """Wrap shared wait conditions so active combat logs retain their result."""
+        condition = args[0] if args else kwargs.get('condition')
+        condition_name = getattr(condition, '__name__', None) or repr(condition)
+        time_out = kwargs.get('time_out', args[1] if len(args) > 1 else None)
+        try:
+            result = super().wait_until(*args, **kwargs)
+        except Exception as error:
+            recorder = getattr(self, 'battle_log', None)
+            if recorder is not None:
+                recorder.record_decision(
+                    '',
+                    f'等待条件: {condition_name}',
+                    False,
+                    '等待条件时发生异常',
+                    detail={'timeout': time_out, 'error': str(error)},
+                )
+            raise
+        recorder = getattr(self, 'battle_log', None)
+        if recorder is not None:
+            recorder.record_decision(
+                '',
+                f'等待条件: {condition_name}',
+                bool(result),
+                '条件满足' if result else '条件未满足或超时',
+                detail={'timeout': time_out},
+            )
+        return result
 
     def set_key(self, key, box):
         best = self.find_best_match_in_box(box, ['t', 'e', 'r', 'q'], threshold=0.7)
@@ -1046,6 +1134,8 @@ class BaseCombatTask(CombatCheck):
                 else:
                     char.is_current_char = False
         self.combat_start = time.time()
+        self._battle_outcome = 'completed'
+        self._battle_outcome_detail = None
         if len(self.chars) >= 2:
             if self._char_identity(self.chars) != previous_char_identity:
                 translated_names = []

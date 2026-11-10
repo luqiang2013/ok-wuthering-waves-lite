@@ -26,12 +26,18 @@ class AutoCombatTask(BaseCombatTask, TriggerTask):
             'Use Liberation': True,
             'Check Levitator': True,
             'Switch to Healer before and after Combat': True,
+            '启用战斗日志': True,
         })
+        if self.config is not None:
+            legacy_battle_log = self.config.pop('Enable Battle Log', None)
+            if legacy_battle_log is not None:
+                self.config['启用战斗日志'] = bool(legacy_battle_log)
         self.config_description = {
             'Auto Target': 'Turn off to enable auto combat only when manually target enemy using middle click',
             'Use Liberation': 'Do not use Liberation in Open World to Save Time',
             'Check Levitator': 'Toggle the levitator and verify if the character is floating',
             'Switch to Healer before and after Combat': 'Better Chance to Keep Character Alive',
+            '启用战斗日志': '记录每场战斗的条件判定和对应操作',
         }
         self.op_index = 0
         self.char_features_warmed_up = False
@@ -43,6 +49,7 @@ class AutoCombatTask(BaseCombatTask, TriggerTask):
 
     def reset_auto_combat(self, reason):
         self._reset_combat_on_run = False
+        self.battle_log.finish(outcome='aborted', detail=reason)
         self.reset_to_false(reason)
         self.chars = [None, None, None]
         self.freeze_durations = []
@@ -81,15 +88,20 @@ class AutoCombatTask(BaseCombatTask, TriggerTask):
         switched_to_healer = False
         while self.in_combat():
             ret = True
+            self.sync_battle_log_enabled()
             try:
                 if not switched_to_healer:
                     self.switch_healer()
                     switched_to_healer = True
                 self.get_current_char().perform()
             except CharDeadException:
+                self._battle_outcome = 'char_dead'
+                self._battle_outcome_detail = '角色死亡'
                 self.log_error(self.tr('Characters dead'), notify=True)
                 break
             except NotInCombatException as e:
+                self._battle_outcome = 'left_combat'
+                self._battle_outcome_detail = str(e)
                 logger.info(f'auto_combat_task_out_of_combat {int(time.time() - combat_start)} {e}')
                 break
         if ret:
