@@ -158,7 +158,7 @@ monthly_card_config_option = ConfigOption('Monthly Card Config', {
 
 config = {
     'debug': False,  # Optional, default: False
-    'custom_tasks': True,
+    'custom_tasks': False,
     "gui": {
         "type": "qt",
     },
@@ -171,13 +171,13 @@ config = {
         'all': {'light': '#526174', 'dark': '#B5BECF'},
         'onetime': {'light': '#087C70', 'dark': '#72D9CC'},
         'trigger': {'light': '#AC3652', 'dark': '#F09AA8'},
-        'group:Daily Activities': {'light': '#2668AA', 'dark': '#8ABCF0'},
-        'group:Echo Management': {'light': '#8C651A', 'dark': '#E8C27C'},
-        'group:Multi-account': {'light': '#7650A5', 'dark': '#C2A3EA'},
     },
     'config_folder': 'configs',
     'blur_area': blur_area,
     'gui_icon': 'icons/icon.png',
+    'custom_tabs': [
+        ["src.gui.CharacterCodeTab", "CharacterCodeTab"],
+    ],
     'global_configs': [basic_config_option, key_config_option, char_config_option, monthly_card_config_option],
     'ocr': {
         'lib': 'onnxocr',
@@ -187,7 +187,7 @@ config = {
             'use_npu': True,
         }
     },
-    'plugin':True,
+    'plugin': False,
     'my_app': ['src.globals', 'Globals'],
     'start_timeout': 120,  # default 60
     'update_only_game_exit': True,  # if startup skipped the update check, check 10s after the game exits
@@ -269,32 +269,7 @@ config = {
     'launcher_error_log_file': 'logs/launcher_error.log',
     'version': version,
     'onetime_tasks': [  # tasks to execute
-        ["src.task.DailyTask", "DailyTask"],
-        ["src.task.FarmEchoTask", "FarmEchoTask"],
-        ["src.task.NightmareNestTask", "NightmareNestTask"],
-        ["src.task.TacetTask", "TacetTask"],
-        ["src.task.ForgeryTask", "ForgeryTask"],
-        ["src.task.SimulationTask", "SimulationTask"],
-        ["src.task.MultiAccountDailyTask", "MultiAccountDailyTask"],
-        ["src.task.MultiAccountConfigTask", "MultiAccountConfigTask"],
-        ["src.task.MergeEchoTask", "MergeEchoTask"],
-        ["src.task.EnhanceEchoTask", "EnhanceEchoTask"],
-        ["src.task.ChangeEchoTask", "ChangeEchoTask"],
-        ["src.task.GardenTask", "GardenTask"],
-        ["src.task.TacetEliminationTask", "TacetEliminationTask"],
-        # ["src.task.DiagnosisTask", "DiagnosisTask"],
     ], 'trigger_tasks': [
         ["src.task.AutoCombatTask", "AutoCombatTask"],
-        ["src.task.AutoPickTask", "AutoPickTask"],
-        ["src.task.AutoLoginTask", "AutoLoginTask"],
-        ["src.task.SkipDialogTask", "AutoDialogTask"],
-        ["src.task.FastTravelTask", "FastTravelTask"],
-        ["src.task.MouseResetTask", "MouseResetTask"],
     ], 'scene': ["src.scene.WWScene", "WWScene"],
-    'update_pyappify': {
-        'to_version': '1.2.3',
-        'zip_url': 'https://github.com/ok-oldking/ok-wuthering-waves/releases/download/v3.5.30/ok-ww-win32.zip',
-        'sha256': '447207edbfb6944beb994347048e155df99775eb18c87dcae54dda125071c94a',
-    }
-
 }

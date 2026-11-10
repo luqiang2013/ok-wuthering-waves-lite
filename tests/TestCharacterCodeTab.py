@@ -1,5 +1,4 @@
 import os
-import json
 import tempfile
 import unittest
 from concurrent.futures import Future
@@ -7,7 +6,6 @@ from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
-from urllib.error import HTTPError
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -40,8 +38,7 @@ from src.char.Verina import Verina
 from src.char.YangYangSp import YangYangSp
 from src.gui.CharacterCodeTab import (
     STATE_DOT_SIZE, CharacterCodeTab, ExportTeamDialog, ImportTeamDialog, TeamInfoDialog,
-    TeamSelectionDialog, WorkshopDialog, fetch_all_workshop_teams, fetch_workshop_codes,
-    team_state_color, workshop_team_url,
+    TeamSelectionDialog, team_state_color,
 )
 
 
@@ -211,97 +208,6 @@ class TestCharacterCodeTab(unittest.TestCase):
         finally:
             tab.deleteLater()
 
-    def test_workshop_url_uses_sorted_team_slug(self):
-        self.assertEqual(
-            workshop_team_url((Baizhi, Augusta, Aemeath)),
-            "https://cfokwwchar.ok-script.com/teams/Aemeath_Augusta_Baizhi.json",
-        )
-
-    def test_workshop_url_sanitizes_character_name_punctuation(self):
-        self.assertEqual(
-            workshop_team_url((YangYangSp, Chisa, Suisui)),
-            "https://cfokwwchar.ok-script.com/teams/Chisa_Suisui_Yangyang_Xuanling.json",
-        )
-
-    def test_workshop_codes_are_sorted_by_timestamp_descending(self):
-        payload = {
-            "members": ["Aemeath", "Augusta", "Baizhi"],
-            "codes": [{"name": "older", "timestamp": 10}, {"name": "newer", "timestamp": 20}],
-        }
-
-        class Response:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                pass
-
-            def read(self, _size):
-                return json.dumps(payload).encode("utf-8")
-
-        with (
-            patch("src.gui.CharacterCodeTab.urlopen", return_value=Response()) as open_url,
-            patch("src.gui.CharacterCodeTab.logger.info") as log_info,
-        ):
-            codes = fetch_workshop_codes((Aemeath, Augusta, Baizhi))
-        self.assertEqual([code["name"] for code in codes], ["newer", "older"])
-        request = open_url.call_args.args[0]
-        self.assertEqual(request.full_url, workshop_team_url((Aemeath, Augusta, Baizhi)))
-        self.assertEqual(request.get_header("User-agent"), "ok-wuthering-waves")
-        self.assertEqual(open_url.call_args.kwargs, {"timeout": 15})
-        log_info.assert_called_once_with(
-            "char code workshop request: "
-            "https://cfokwwchar.ok-script.com/teams/Aemeath_Augusta_Baizhi.json"
-        )
-
-    def test_workshop_404_is_an_empty_list(self):
-        error = HTTPError("https://example.invalid", 404, "Not Found", {}, None)
-        with patch("src.gui.CharacterCodeTab.urlopen", side_effect=error):
-            self.assertEqual(fetch_workshop_codes((Aemeath, Augusta, Baizhi)), [])
-
-    def test_workshop_index_sends_app_user_agent(self):
-        payload = {"teams": [{"team": "Test team", "members": ["Aemeath"],
-                              "codes": [{"name": "Test code", "timestamp": 1}]}]}
-        with patch("src.gui.CharacterCodeTab.urlopen") as open_url:
-            open_url.return_value.__enter__.return_value.read.return_value = json.dumps(payload).encode()
-            codes = fetch_all_workshop_teams()
-
-        self.assertEqual(codes[0]["name"], "Test code")
-        self.assertEqual(codes[0]["team"], "Test team")
-        request = open_url.call_args.args[0]
-        self.assertEqual(request.full_url, "https://cfokwwchar.ok-script.com/teams.json")
-        self.assertEqual(request.get_header("User-agent"), "ok-wuthering-waves")
-        self.assertEqual(open_url.call_args.kwargs, {"timeout": 15})
-
-    def test_workshop_archive_sends_app_user_agent(self):
-        tab = CharacterCodeTab()
-        try:
-            for field, url, expected_url in (
-                ("downloadUrl", "https://cfokwwchar.ok-script.com/team.zip",
-                 "https://cfokwwchar.ok-script.com/team.zip"),
-                ("rawUrl", "https://raw.githubusercontent.com/example/team.zip",
-                 "https://raw.githubusercontent.com/example/team.zip"),
-                ("downloadUrl", "https://okwwcharcode.ok-script.com/codes/team%20name.zip",
-                 "https://cfokwwchar.ok-script.com/codes/team%20name.zip"),
-            ):
-                with (
-                    self.subTest(url=url),
-                    patch("src.gui.CharacterCodeTab.urlopen") as open_url,
-                    patch.object(tab, "_preview_and_import_archive") as preview,
-                ):
-                    open_url.return_value.__enter__.return_value.read.return_value = b"archive contents"
-                    preview.side_effect = lambda path, **kwargs: self.assertEqual(
-                        path.read_bytes(), b"archive contents")
-                    tab._import_workshop_code({field: url}, tab)
-
-                    request = open_url.call_args.args[0]
-                    self.assertEqual(request.full_url, expected_url)
-                    self.assertEqual(request.get_header("User-agent"), "ok-wuthering-waves")
-                    self.assertEqual(open_url.call_args.kwargs, {"timeout": 30})
-                    preview.assert_called_once()
-        finally:
-            tab.deleteLater()
-
     def test_team_dialogs_use_qt_kit_widgets(self):
         parent = CharacterCodeTab()
         try:
@@ -311,18 +217,11 @@ class TestCharacterCodeTab(unittest.TestCase):
             import_dialog = ImportTeamDialog(
                 {"name": "Team", "description": "Description", "version": "1.0.0"},
                 "Aemeath, Augusta, Baizhi", parent)
-            workshop_dialog = WorkshopDialog([{
-                "name": "Team", "description": "Description", "author": "Author",
-                "version": "1.0.0", "timestamp": 1, "sizeFormatted": "1 KB",
-            }], "Aemeath, Augusta, Baizhi", parent)
-            dialogs = (create_dialog, export_dialog, import_dialog, workshop_dialog)
+            dialogs = (create_dialog, export_dialog, import_dialog)
             self.assertTrue(all(isinstance(dialog, Dialog) for dialog in dialogs))
             self.assertTrue(all(isinstance(combo, ComboBox) for combo in create_dialog.combos))
             self.assertIsInstance(export_dialog.name_edit, QLineEdit)
             self.assertIsInstance(export_dialog.description_edit, QTextEdit)
-            self.assertIsNotNone(workshop_dialog.findChild(QTableWidget))
-            self.assertIn("Aemeath, Augusta, Baizhi", workshop_dialog.windowTitle())
-            self.assertEqual(workshop_dialog.ok_button.text(), "Close")
         finally:
             parent.deleteLater()
 
@@ -819,48 +718,6 @@ class TestCharacterCodeTab(unittest.TestCase):
             self.assertEqual(read_team_char_code(team_b, Baizhi), local_code)
             self.assertEqual(read_team_import_code(team_b, Baizhi), local_code)
             self.assertEqual(read_team_import_code(team_b, Chisa), read_builtin_char_code(Chisa))
-        finally:
-            tab.deleteLater()
-
-    def test_workshop_import_asks_first_and_selects_the_imported_team(self):
-        team_a = (Mortefi, Chixia, Verina)
-        team_b = (Chisa, Baizhi, Aemeath)
-        create_custom_team(team_b)
-        for char_cls in team_b:
-            save_team_char_code(team_b, char_cls, self._imported_code(char_cls.__name__))
-        archive = export_custom_team(
-            team_b, Path(self.temp_dir.name) / "out", "Team", "Description", "Tester", "1")
-        delete_custom_team(team_b)
-        create_custom_team(team_a)
-
-        tab = CharacterCodeTab()
-        try:
-            tab.editor.setPlainText(tab.editor.toPlainText() + "\n# unsaved\n")
-            with (
-                patch("src.gui.CharacterCodeTab.fetch_all_workshop_teams", return_value=[]) as fetch,
-                patch("src.gui.CharacterCodeTab.WorkshopDialog"),
-                patch.object(CharacterCodeTab, "_confirm_discard_changes", return_value=False),
-            ):
-                tab._open_workshop()
-            fetch.assert_not_called()
-            self.assertTrue(tab._has_unsaved_changes())
-
-            with (
-                patch("src.gui.CharacterCodeTab.fetch_all_workshop_teams", return_value=[]) as fetch,
-                patch("src.gui.CharacterCodeTab.WorkshopDialog"),
-                patch.object(CharacterCodeTab, "_confirm_discard_changes", return_value=True) as discard,
-                patch.object(ImportTeamDialog, "exec", return_value=True),
-                patch("src.gui.CharacterCodeTab.show_info_bar"),
-            ):
-                tab._open_workshop()
-                fetch.assert_called_once()
-                # the very call the workshop import makes after downloading
-                tab._preview_and_import_archive(archive, expected_team=None)
-
-            discard.assert_called_once()
-            self.assertEqual(tab.current_team, self._names(team_b))
-            self.assertEqual(tuple(tab.team_list.currentItem().data(Qt.UserRole)), self._names(team_b))
-            self.assertEqual(team_code_state(team_b), TEAM_CODE_MODE_IMPORT)
         finally:
             tab.deleteLater()
 

@@ -33,6 +33,11 @@ class Globals:
     def yolo_detect(self, image, threshold=0.6, label=-1):
         return self.yolo_model.detect(image, threshold=threshold, label=label)
 
+    def on_show_main_window(self, main_window):
+        notification_tab = getattr(main_window, 'notification_tab', None)
+        if notification_tab is not None:
+            main_window.remove_page(notification_tab)
+
 
 if __name__ == "__main__":
     glbs = Globals(exit_event=None)

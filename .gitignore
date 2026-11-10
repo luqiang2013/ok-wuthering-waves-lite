@@ -75,5 +75,7 @@ autohelper
 working_images/
 repo/
 
+.DS_Store
+**/.DS_Store
+
 assets/result.json
-src/gui/CharacterCodeTab.py

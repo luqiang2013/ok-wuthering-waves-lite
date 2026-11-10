@@ -1,22 +1,18 @@
 import difflib
 import json
 import re
-import tempfile
-from datetime import datetime
 from pathlib import Path
-from urllib.error import HTTPError
-from urllib.parse import quote, urlparse
-from urllib.request import Request, urlopen
 
-from PySide6.QtCore import QPointF, Qt, QSize, QUrl, Signal
+from PySide6.QtCore import QPointF, Qt, QSize, Signal
 from PySide6.QtGui import (
-    QColor, QDesktopServices, QFontMetricsF, QPainter, QPixmap, QTextCursor, QTextFormat, QTextLayout,
+    QColor, QFontMetricsF, QPainter, QPixmap, QTextCursor, QTextFormat,
+    QTextLayout,
 )
 from PySide6.QtWidgets import (
-    QApplication, QFileDialog, QAbstractItemView, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QSplitter, QStyle,
-    QStyledItemDelegate, QStyleOptionViewItem, QTableWidget, QTableWidgetItem, QTextEdit,
-    QVBoxLayout, QWidget,
+    QApplication, QFileDialog, QAbstractItemView, QGridLayout, QHBoxLayout, QHeaderView,
+    QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QSizePolicy, QSplitter,
+    QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTableWidget, QTableWidgetItem,
+    QTextEdit, QVBoxLayout, QWidget,
 )
 from ok.ui.qt.kit.buttons import Button
 from ok.ui.qt.kit.dialogs import Dialog
@@ -40,11 +36,6 @@ from src.char.CustomCharLoader import (
 )
 
 BASE_CHAR_URL = "https://raw.githubusercontent.com/ok-oldking/ok-wuthering-waves/refs/heads/master/src/char/BaseChar.py"
-UPLOAD_TEAM_URL = "https://github.com/ok-oldking/ok-ww-char-code"
-WORKSHOP_TEAMS_ALL_URL = "https://cfokwwchar.ok-script.com/teams.json"
-WORKSHOP_TEAM_URL = "https://cfokwwchar.ok-script.com/teams/{slug}.json"
-WORKSHOP_ARCHIVE_HOSTS = {"cfokwwchar.ok-script.com", "raw.githubusercontent.com"}
-WORKSHOP_USER_AGENT = "ok-wuthering-waves"
 logger = Logger.get_logger(__name__)
 
 # The team list marks each team with a haloed dot, and both switch buttons wear the
@@ -157,8 +148,6 @@ def translate_ui(message):
             "Character:": "角色:",
             "{count} configurations": "{count} 个配置",
             "No shared code matches the search criteria.": "未找到符合搜索条件的配置。",
-            "Team Workshop": "队伍创意工坊",
-            "{team_name} - Team Workshop": "{team_name} - 队伍工坊",
             "Configuration Details": "配置详情",
             "Team": "队伍",
             "Description": "描述",
@@ -202,6 +191,10 @@ def translate_ui(message):
             "Keep as Imported Code and Switch": "保存为导入代码并切换",
             "Skipped {count} teams whose current code is not kept as imported code, switch them one by one.": "已跳过 {count} 个当前代码未保存为导入代码的队伍，请逐个切换。",
             "Partially Completed": "部分完成",
+            "Create": "创建",
+            "Delete": "删除",
+            "Import Team": "导入队伍",
+            "Export": "导出",
         },
         "zh_TW": {
             "Search by team, character, author or description...": "搜尋隊伍、角色、作者或說明...",
@@ -209,8 +202,6 @@ def translate_ui(message):
             "Character:": "角色:",
             "{count} configurations": "{count} 個設定",
             "No shared code matches the search criteria.": "未找到符合搜尋條件的設定。",
-            "Team Workshop": "隊伍工作坊",
-            "{team_name} - Team Workshop": "{team_name} - 隊伍工作坊",
             "Configuration Details": "設定詳情",
             "Team": "隊伍",
             "Description": "說明",
@@ -254,6 +245,10 @@ def translate_ui(message):
             "Keep as Imported Code and Switch": "儲存為匯入程式碼並切換",
             "Skipped {count} teams whose current code is not kept as imported code, switch them one by one.": "已跳過 {count} 個目前程式碼未儲存為匯入程式碼的隊伍，請逐一切換。",
             "Partially Completed": "部分完成",
+            "Create": "新增",
+            "Delete": "刪除",
+            "Import Team": "匯入隊伍",
+            "Export": "匯出",
         },
         "ja_JP": {
             "Search by team, character, author or description...": "チーム、キャラクター、作者、説明を検索...",
@@ -261,8 +256,6 @@ def translate_ui(message):
             "Character:": "キャラクター:",
             "{count} configurations": "{count} 件の構成",
             "No shared code matches the search criteria.": "検索条件に一致する共有コードが見つかりません。",
-            "Team Workshop": "チームワークショップ",
-            "{team_name} - Team Workshop": "{team_name} - チームワークショップ",
             "Configuration Details": "構成の詳細",
             "Team": "チーム",
             "Description": "説明",
@@ -306,6 +299,10 @@ def translate_ui(message):
             "Keep as Imported Code and Switch": "インポートしたコードとして保存して切り替え",
             "Skipped {count} teams whose current code is not kept as imported code, switch them one by one.": "現在のコードがインポートしたコードとして保存されていない {count} 個のチームをスキップしました。個別に切り替えてください。",
             "Partially Completed": "一部完了",
+            "Create": "作成",
+            "Delete": "削除",
+            "Import Team": "チームをインポート",
+            "Export": "書き出し",
         },
         "ko_KR": {
             "Search by team, character, author or description...": "파티, 캐릭터, 제작자 또는 설명 검색...",
@@ -313,8 +310,6 @@ def translate_ui(message):
             "Character:": "캐릭터:",
             "{count} configurations": "{count}개 구성",
             "No shared code matches the search criteria.": "검색 조건과 일치하는 공유 코드가 없습니다.",
-            "Team Workshop": "파티 창작마당",
-            "{team_name} - Team Workshop": "{team_name} - 파티 창작마당",
             "Configuration Details": "구성 상세 정보",
             "Team": "파티",
             "Description": "설명",
@@ -358,6 +353,10 @@ def translate_ui(message):
             "Keep as Imported Code and Switch": "가져온 코드로 저장 후 전환",
             "Skipped {count} teams whose current code is not kept as imported code, switch them one by one.": "현재 코드가 가져온 코드로 저장되지 않은 {count}개 팀을 건너뛰었습니다. 하나씩 전환하세요.",
             "Partially Completed": "일부 완료",
+            "Create": "생성",
+            "Delete": "삭제",
+            "Import Team": "팀 가져오기",
+            "Export": "내보내기",
         },
         "es_ES": {
             "Search by team, character, author or description...": "Buscar por equipo, personaje, autor o descripción...",
@@ -365,8 +364,6 @@ def translate_ui(message):
             "Character:": "Personaje:",
             "{count} configurations": "{count} configuraciones",
             "No shared code matches the search criteria.": "No se encontraron códigos compartidos que coincidan.",
-            "Team Workshop": "Taller de equipos",
-            "{team_name} - Team Workshop": "{team_name} - Taller de equipos",
             "Configuration Details": "Detalles de configuración",
             "Team": "Equipo",
             "Description": "Descripción",
@@ -410,6 +407,10 @@ def translate_ui(message):
             "Keep as Imported Code and Switch": "Guardar como código importado y cambiar",
             "Skipped {count} teams whose current code is not kept as imported code, switch them one by one.": "Se omitieron {count} equipos cuyo código actual no está guardado como código importado; cámbialos uno por uno.",
             "Partially Completed": "Completado parcialmente",
+            "Create": "Crear",
+            "Delete": "Eliminar",
+            "Import Team": "Importar equipo",
+            "Export": "Exportar",
         },
     }
 
@@ -449,95 +450,6 @@ class TranslatedDialog(Dialog):
         self.body.addWidget(label_widget)
         self.body.addWidget(value_widget)
         return value_widget
-
-
-def workshop_team_slug(team):
-    names = sorted((
-        re.sub(r"[^A-Za-z0-9-]+", "_", get_english_char_name(name)).strip("_")
-        for name in normalize_team(team)
-    ), key=str.casefold)
-    return "_".join(names)
-
-
-def workshop_team_url(team):
-    return WORKSHOP_TEAM_URL.format(slug=quote(workshop_team_slug(team), safe="_-"))
-
-
-def fetch_all_workshop_teams():
-    url = WORKSHOP_TEAMS_ALL_URL
-    logger.info(f"char code workshop all teams request: {url}")
-    try:
-        with urlopen(Request(url, headers={"User-Agent": WORKSHOP_USER_AGENT}), timeout=15) as response:
-            content = response.read(5_000_001)
-    except HTTPError as error:
-        if error.code == 404:
-            return []
-        raise
-    if len(content) > 5_000_000:
-        raise ValueError(translate_ui("Workshop response is too large."))
-    try:
-        payload = json.loads(content.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ValueError(translate_ui("Workshop returned invalid JSON.")) from error
-    if not isinstance(payload, dict) or not isinstance(payload.get("teams"), list):
-        raise ValueError(translate_ui("Workshop response is invalid."))
-
-    all_codes = []
-    for team_entry in payload["teams"]:
-        if not isinstance(team_entry, dict):
-            continue
-        team_str = team_entry.get("team", "")
-        members = team_entry.get("members", [])
-        codes = team_entry.get("codes", [])
-        for code in codes:
-            if not isinstance(code, dict):
-                continue
-            item = dict(code)
-            if "team" not in item or not item["team"]:
-                item["team"] = team_str
-            if "members" not in item or not item["members"]:
-                item["members"] = members
-            all_codes.append(item)
-
-    return sorted(all_codes, key=lambda code: int(code.get("timestamp") or 0), reverse=True)
-
-
-def fetch_workshop_codes(team):
-    expected_members = sorted((get_english_char_name(name) for name in normalize_team(team)), key=str.casefold)
-    url = workshop_team_url(team)
-    logger.info(f"char code workshop request: {url}")
-    try:
-        with urlopen(Request(url, headers={"User-Agent": WORKSHOP_USER_AGENT}), timeout=15) as response:
-            content = response.read(2_000_001)
-    except HTTPError as error:
-        if error.code == 404:
-            return []
-        raise
-    if len(content) > 2_000_000:
-        raise ValueError(translate_ui("Workshop response is too large."))
-    try:
-        payload = json.loads(content.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ValueError(translate_ui("Workshop returned invalid JSON.")) from error
-    if not isinstance(payload, dict) or not isinstance(payload.get("codes"), list):
-        raise ValueError(translate_ui("Workshop response is invalid."))
-    members = payload.get("members")
-    if members is not None and sorted(members, key=str.casefold) != expected_members:
-        raise ValueError(translate_ui("Workshop returned a different team."))
-    codes = [code for code in payload["codes"] if isinstance(code, dict)]
-    return sorted(codes, key=lambda code: int(code.get("timestamp") or 0), reverse=True)
-
-
-def format_workshop_local_time(code, date_only=False):
-    modified_at = code.get("modifiedAt")
-    try:
-        if modified_at:
-            value = datetime.fromisoformat(str(modified_at).replace("Z", "+00:00")).astimezone()
-        else:
-            value = datetime.fromtimestamp(float(code.get("timestamp") or 0)).astimezone()
-        return value.strftime("%Y-%m-%d") if date_only else value.strftime("%Y-%m-%d %H:%M:%S")
-    except (TypeError, ValueError, OSError):
-        return ""
 
 
 class TeamSelectionDialog(TranslatedDialog):
@@ -658,203 +570,6 @@ class TeamInfoDialog(TranslatedDialog):
         self.set_cancel_visible(False)
 
 
-class WorkshopDialog(TranslatedDialog):
-    import_requested = Signal(object)
-
-    def __init__(self, codes, team_name=None, parent=None):
-        super().__init__(parent)
-        self.all_codes = list(codes)
-        self.filtered_codes = list(codes)
-        self.panel.setFixedWidth(1100)
-        self.panel.setMinimumHeight(560)
-        if team_name:
-            title = self.tr("{team_name} - Team Workshop").format(team_name=team_name)
-        else:
-            title = self.tr("Team Workshop")
-        self.set_dialog_title(title)
-
-        filter_layout = QHBoxLayout()
-        self.search_edit = QLineEdit(self.panel)
-        self.search_edit.setPlaceholderText(
-            self.tr("Search by team, character, author or description...")
-        )
-        self.search_edit.setClearButtonEnabled(True)
-        self.search_edit.textChanged.connect(self._apply_filter)
-
-        self.char_filter_combo = ComboBox(parent=self.panel)
-        self.char_filter_combo.setMinimumWidth(160)
-        self.char_filter_combo.addItem(self.tr("All Characters"), userData="")
-
-        all_chars = set()
-        for code in self.all_codes:
-            for member in code.get("members", []):
-                if member:
-                    all_chars.add(member)
-
-        sorted_chars = sorted(
-            all_chars,
-            key=lambda c: self.tr(get_english_char_name(c)).casefold(),
-        )
-        for char_name in sorted_chars:
-            display_name = self.tr(get_english_char_name(char_name))
-            self.char_filter_combo.addItem(display_name, userData=char_name)
-        self.char_filter_combo.currentIndexChanged.connect(self._apply_filter)
-
-        self.count_label = QLabel("", self.panel)
-
-        filter_layout.addWidget(self.search_edit, 1)
-        filter_layout.addWidget(QLabel(self.tr("Character:"), self.panel))
-        filter_layout.addWidget(self.char_filter_combo)
-        filter_layout.addWidget(self.count_label)
-        self.body.addLayout(filter_layout)
-
-        self.table = QTableWidget(self.panel)
-        self.table.setColumnCount(6)
-        self.table.setHorizontalHeaderLabels([
-            self.tr("Team"), self.tr("Description"), self.tr("Author"),
-            self.tr("Version"), self.tr("Modified"), self.tr("Action"),
-        ])
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setWordWrap(False)
-        self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(40)
-        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Interactive)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Interactive)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Interactive)
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Fixed)
-        self.table.setColumnWidth(0, 185)
-        self.table.setColumnWidth(2, 130)
-        self.table.setColumnWidth(3, 85)
-        self.table.setColumnWidth(4, 120)
-        self.table.setColumnWidth(5, 80)
-        self.table.setStyleSheet("QTableView::item { padding-left: 5px; padding-right: 5px; }")
-        self.table.cellDoubleClicked.connect(self._on_row_double_clicked)
-
-        self.body.addWidget(self.table, 1)
-
-        self.empty_label = QLabel(self.tr("No shared code matches the search criteria."), self.panel)
-        self.empty_label.setAlignment(Qt.AlignCenter)
-        self.body.addWidget(self.empty_label)
-        self.empty_label.hide()
-
-        self.ok_button.setText(self.tr("Close"))
-        self.set_cancel_visible(False)
-        self._apply_filter()
-
-    def _team_display_text(self, code):
-        members = code.get("members")
-        if members and isinstance(members, list):
-            names = [self.tr(get_english_char_name(m.strip())) for m in members if m.strip()]
-            return ", ".join(names)
-        raw_team = code.get("team", "")
-        if raw_team:
-            names = [self.tr(get_english_char_name(m.strip())) for m in raw_team.split(",") if m.strip()]
-            return ", ".join(names)
-        return ""
-
-    def _apply_filter(self):
-        query = self.search_edit.text().strip().lower()
-        selected_char = self.char_filter_combo.currentData()
-
-        matched = []
-        for code in self.all_codes:
-            if selected_char:
-                members = [str(m).casefold() for m in code.get("members", [])]
-                if selected_char.casefold() not in members:
-                    continue
-
-            if query:
-                name = str(code.get("name", "")).lower()
-                author = str(code.get("author", "")).lower()
-                description = str(code.get("description", "")).lower()
-                raw_team = str(code.get("team", "")).lower()
-                display_team = self._team_display_text(code).lower()
-                member_names = " ".join(str(m).lower() for m in code.get("members", []))
-                
-                search_target = f"{name} {author} {description} {raw_team} {display_team} {member_names}"
-                if query not in search_target:
-                    continue
-
-            matched.append(code)
-
-        self.filtered_codes = matched
-        self._update_table()
-
-    def _update_table(self):
-        codes = self.filtered_codes
-        count_text = self.tr("{count} configurations").format(count=len(codes))
-        self.count_label.setText(count_text)
-
-        if not codes:
-            self.table.setRowCount(0)
-            self.table.hide()
-            self.empty_label.show()
-            return
-
-        self.empty_label.hide()
-        self.table.show()
-        self.table.setRowCount(len(codes))
-        for row, code in enumerate(codes):
-            display_team = self._team_display_text(code)
-            raw_desc = str(code.get("description", "") or "")
-            # Take only the first non-empty line for a crisp single-line preview in table
-            lines = [line.strip() for line in raw_desc.splitlines() if line.strip()]
-            desc = lines[0] if lines else ""
-            values = (
-                display_team,
-                desc,
-                code.get("author", ""),
-                code.get("version", ""),
-                format_workshop_local_time(code, date_only=True),
-            )
-            for column, value in enumerate(values):
-                item = QTableWidgetItem(str(value))
-                item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-                if column == 1:
-                    # Hovering shows the original full multi-line description without loss
-                    item.setToolTip(raw_desc)
-                self.table.setItem(row, column, item)
-
-            # Cell widget with container and layout to ensure button is neatly centered
-            container = QWidget(self.table)
-            container_layout = QHBoxLayout(container)
-            container_layout.setContentsMargins(0, 2, 0, 2)
-            container_layout.setAlignment(Qt.AlignCenter)
-            button = Button(self.tr("Import"), variant="primary", parent=container)
-            button.setFixedSize(60, 28)
-            button.clicked.connect(lambda _checked=False, item=code: self.import_requested.emit(item))
-            container_layout.addWidget(button)
-            self.table.setCellWidget(row, 5, container)
-
-    def _on_row_double_clicked(self, row, _col):
-        if 0 <= row < len(self.filtered_codes):
-            code = self.filtered_codes[row]
-            dialog = TranslatedDialog(self.window())
-            dialog.panel.setFixedWidth(560)
-            dialog.set_dialog_title(self.tr("Configuration Details"))
-            dialog.add_field(self.tr("Team"), self._team_display_text(code))
-            dialog.add_field(self.tr("Name"), code.get("name", ""))
-            dialog.add_field(self.tr("Author"), code.get("author", ""))
-            dialog.add_field(self.tr("Version"), code.get("version", ""))
-            dialog.add_field(self.tr("Modified"), format_workshop_local_time(code))
-            
-            desc_label = QLabel(self.tr("Description"), dialog.panel)
-            desc_edit = QTextEdit(dialog.panel)
-            desc_edit.setPlainText(code.get("description", ""))
-            desc_edit.setReadOnly(True)
-            desc_edit.setFixedHeight(180)
-            dialog.body.addWidget(desc_label)
-            dialog.body.addWidget(desc_edit)
-
-            dialog.ok_button.setText(self.tr("Import"))
-            dialog.cancel_button.setText(self.tr("Close"))
-            if dialog.exec():
-                self.import_requested.emit(code)
-
 
 class CharacterCodeTab(CustomTab):
     current_team_loaded = Signal(object)
@@ -893,48 +608,45 @@ class CharacterCodeTab(CustomTab):
         self.switch_all_button = Button(translate_ui("Switch All to Built In Code"))
         self.switch_all_button.setToolTip(
             translate_ui("Switch every team between imported and built in code"))
+        self.switch_all_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.switch_all_button.clicked.connect(self._switch_all_code_mode)
-        left_layout.addWidget(self.switch_all_button)
-        team_buttons = QVBoxLayout()
-        first_team_button_row = QHBoxLayout()
-        self.create_team_button = Button(self.tr("Create Team"), icon="plus", variant="primary")
+        action_grid = QGridLayout()
+        action_grid.setContentsMargins(0, 0, 0, 0)
+        action_grid.setHorizontalSpacing(6)
+        action_grid.setVerticalSpacing(6)
+        self.create_team_button = Button(translate_ui("Create"), icon="plus", variant="primary")
+        self.create_team_button.setToolTip(self.tr("Create Team"))
         self.create_team_button.clicked.connect(self._create_team)
-        self.delete_team_button = Button(self.tr("Delete Team"), icon="trash")
+        self.delete_team_button = Button(translate_ui("Delete"), icon="trash", variant="danger")
+        self.delete_team_button.setToolTip(self.tr("Delete Team"))
         self.delete_team_button.clicked.connect(self._delete_team)
-        self.workshop_button = Button(self.tr("Workshop"), icon="layers")
-        self.workshop_button.clicked.connect(self._open_workshop)
-        first_team_button_row.addWidget(self.create_team_button)
-        first_team_button_row.addWidget(self.delete_team_button)
-        second_team_button_row = QHBoxLayout()
-        self.import_team_button = Button(self.tr("Import Team"), icon="download")
+        self.import_team_button = Button(translate_ui("Import"), icon="download", variant="tonal")
+        self.import_team_button.setToolTip(self.tr("Import Team"))
         self.import_team_button.clicked.connect(self._import_team)
-        self.export_team_button = Button(self.tr("Export Selected"), icon="export")
+        self.export_team_button = Button(translate_ui("Export"), icon="export")
+        self.export_team_button.setToolTip(self.tr("Export Selected"))
         self.export_team_button.clicked.connect(self._export_team)
-        second_team_button_row.addWidget(self.workshop_button)
-        second_team_button_row.addWidget(self.import_team_button)
-        third_team_button_row = QHBoxLayout()
-        self.upload_team_button = Button(self.tr("Upload Team"), icon="github")
-        self.upload_team_button.clicked.connect(self._open_upload_team)
-        third_team_button_row.addWidget(self.export_team_button)
-        third_team_button_row.addWidget(self.upload_team_button)
+        action_buttons = (self.create_team_button, self.delete_team_button,
+                          self.import_team_button, self.export_team_button)
+        for button in action_buttons:
+            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        action_grid.addWidget(self.create_team_button, 0, 0)
+        action_grid.addWidget(self.delete_team_button, 0, 1)
+        action_grid.addWidget(self.import_team_button, 1, 0)
+        action_grid.addWidget(self.export_team_button, 1, 1)
+        left_layout.addLayout(action_grid)
+        left_layout.addWidget(self.switch_all_button)
         self.export_current_button = None
         if (getattr(og, "app", None) and getattr(og.app, "config", {}).get("debug", False)
                 and (Path.cwd() / ".git").is_dir()):
             self.export_current_button = Button(self.tr("Export Current"), icon="export")
             self.export_current_button.clicked.connect(self._export_current_team)
-            team_buttons.addWidget(self.export_current_button)
-        team_buttons.addLayout(first_team_button_row)
-        team_buttons.addLayout(second_team_button_row)
-        team_buttons.addLayout(third_team_button_row)
-        left_layout.addLayout(team_buttons)
+            left_layout.addWidget(self.export_current_button)
 
         right = QWidget(splitter)
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(8, 0, 0, 0)
         top = QHBoxLayout()
-        self.char_image_label = QLabel()
-        self.char_image_label.setFixedSize(52, 52)
-        self.char_image_label.setAlignment(Qt.AlignCenter)
         self.member_combo = ComboBox(parent=right)
         self.member_combo.setMinimumWidth(190)
         self.member_combo.currentIndexChanged.connect(self._member_selected)
@@ -943,7 +655,6 @@ class CharacterCodeTab(CustomTab):
         self.team_info_button.hide()
         self.ask_ai_button = Button(self.tr("Ask AI"), icon="chat")
         self.ask_ai_button.clicked.connect(self._copy_ask_ai_template)
-        top.addWidget(self.char_image_label)
         top.addWidget(QLabel(self.tr("Character Code")))
         top.addWidget(self.member_combo)
         top.addStretch(1)
@@ -977,6 +688,7 @@ class CharacterCodeTab(CustomTab):
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
+        splitter.setSizes([240, 1360])
         self.add_widget(splitter, stretch=1)
         self._set_editor_enabled(False)
         normalize_custom_teams()
@@ -1113,11 +825,9 @@ class CharacterCodeTab(CustomTab):
 
     def _set_editor_enabled(self, enabled):
         self.editor.setReadOnly(not enabled)
-        for widget in (self.member_combo, self.delete_team_button,
-                       self.export_team_button, self.ask_ai_button, self.reset_button, self.save_button):
+        for widget in (self.member_combo, self.delete_team_button, self.export_team_button,
+                       self.ask_ai_button, self.reset_button, self.save_button):
             widget.setEnabled(enabled)
-        # Workshop button should always remain enabled to allow browsing & importing any team
-        self.workshop_button.setEnabled(True)
         if not enabled:
             self.loading_editor = True
             self.editor.clear()
@@ -1544,41 +1254,6 @@ class CharacterCodeTab(CustomTab):
             return
         self._preview_and_import_archive(archive_path)
 
-    def _open_workshop(self):
-        # An import selects the imported team, so ask before anything is downloaded.
-        if not self._guard_unsaved_changes():
-            return
-        try:
-            codes = fetch_all_workshop_teams()
-        except Exception as e:
-            show_info_bar(self.window(), str(e), title=self.tr("Workshop Error"), error=True)
-            return
-        dialog = WorkshopDialog(codes, parent=self.window())
-        dialog.import_requested.connect(lambda code: self._import_workshop_code(code, dialog))
-        dialog.exec()
-
-    def _import_workshop_code(self, code, parent):
-        url = code.get("downloadUrl") or code.get("rawUrl")
-        parsed = urlparse(str(url or ""))
-        # Published workshop indexes can still contain the previous server's URLs.
-        if parsed.hostname == "okwwcharcode.ok-script.com":
-            parsed = parsed._replace(netloc=urlparse(WORKSHOP_TEAMS_ALL_URL).netloc)
-            url = parsed.geturl()
-        if parsed.scheme != "https" or parsed.hostname not in WORKSHOP_ARCHIVE_HOSTS:
-            show_info_bar(parent, self.tr("Workshop download URL is invalid."), title=self.tr("Error"), error=True)
-            return
-        try:
-            with urlopen(Request(url, headers={"User-Agent": WORKSHOP_USER_AGENT}), timeout=30) as response:
-                content = response.read(20_000_001)
-            if len(content) > 20_000_000:
-                raise ValueError(self.tr("Workshop archive is too large."))
-            with tempfile.TemporaryDirectory() as temp_dir:
-                archive_path = Path(temp_dir) / Path(str(code.get("filename") or "team.zip")).name
-                archive_path.write_bytes(content)
-                self._preview_and_import_archive(archive_path, expected_team=None)
-        except Exception as e:
-            show_info_bar(parent, str(e), title=self.tr("Workshop Error"), error=True)
-
     def _preview_and_import_archive(self, archive_path, expected_team=None):
         try:
             info = inspect_team_archive(archive_path)
@@ -1659,16 +1334,8 @@ class CharacterCodeTab(CustomTab):
         QApplication.clipboard().setText(template)
         show_info_bar(self.window(), self.tr("Ask AI template copied. Paste it into an AI chatbot."), title=self.tr("Copied"))
 
-    def _open_upload_team(self):
-        QDesktopServices.openUrl(QUrl(UPLOAD_TEAM_URL))
-
     def _update_char_image(self):
-        self.char_image_label.clear()
-        if not self.show_char_feature_image:
-            return
-        pixmap = self._get_char_feature_image(self.char_label_by_cls.get(self.current_char_cls))
-        if pixmap is not None and not pixmap.isNull():
-            self.char_image_label.setPixmap(pixmap)
+        pass
 
     def _load_char_feature_index(self):
         feature_index = {}
